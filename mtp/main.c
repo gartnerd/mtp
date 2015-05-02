@@ -77,10 +77,10 @@ int main(int argc, char *argv[])
     fa2->id = 20;
     
     pthread_create(threadA, NULL, p_init, (void*)fa1);
-    pthread_create(threadB, NULL, p_init, (void*)fa2);
+    //pthread_create(threadB, NULL, p_init, (void*)fa2);
     
     pthread_join(*threadA, NULL);
-    pthread_join(*threadB, NULL);
+    //pthread_join(*threadB, NULL);
     
     // need to add some free() calls here
     return(EXIT_SUCCESS);
@@ -150,7 +150,7 @@ void *p_init(void *fa)
         sleep(1); //so we don't flood the network with pings
         
         send_v4(sockfd, sendbuf, pr, id);
-        printf("loop:%d\n", counter);
+        //printf("loop:%d\n", counter);
         counter--;
         
     }
@@ -174,7 +174,7 @@ void send_v4(int fd, void* buffer, icmp_t* spr, int id)
     
     memset(icmp->icmp_data, 0xa5, datalen); //0xa5 is just an arbitrary value that results in an alternating bit pattern
     
-    //    Gettimeofday((struct timeval*)icmp->icmp_data, NULL);
+    gettimeofday((struct timeval*)icmp->icmp_data, NULL);
     
     //ICMP header is a fixed 8 bytes plus 0 or more data bytes
     len = 8 + datalen;
@@ -222,6 +222,15 @@ void proc_v4(char *ptr, ssize_t len, struct msghdr *msg, struct timeval *tvrecv,
         }
         
         tvsend = (struct timeval*)icmp->icmp_data;
+        
+        time_t a = (tvsend->tv_sec) * 1000; // gives milliseconds
+        time_t b = (tvrecv->tv_sec) * 1000; // gives milliseconds
+        
+        suseconds_t aa = (tvsend->tv_usec) / 1000; //gives milliseconds
+        suseconds_t bb = (tvrecv->tv_usec) / 1000; //gives milliseconds
+        
+        printf("a is:%ld aa is:%d\nb is:%ld bb is:%d\nb-a is:%ld\nbb-aa is:%d\nrtt is :%ld\n",
+               a, aa, b, bb, b-a, bb-aa, (b-a)+ (bb-aa));
         
         tvrecv->tv_sec -= tvsend->tv_sec;
         
