@@ -190,6 +190,8 @@ void proc_v4(char *ptr, ssize_t len, struct msghdr *msg, struct timeval *tvrecv,
     long    hlen1, icmplen;
     double  rtt;
     char    str[128];
+    time_t  tvsendSec, tvrecvSec;
+    suseconds_t tvsendUsec, tvrecvUsec;
     struct  ip       *ip;
     struct  icmp     *icmp;
     struct  timeval  *tvsend;
@@ -223,19 +225,21 @@ void proc_v4(char *ptr, ssize_t len, struct msghdr *msg, struct timeval *tvrecv,
         
         tvsend = (struct timeval*)icmp->icmp_data;
         
-        time_t a = (tvsend->tv_sec) * 1000; // gives milliseconds
-        time_t b = (tvrecv->tv_sec) * 1000; // gives milliseconds
+        tvsendSec   = (tvsend->tv_sec) * 1000; // gives milliseconds
+        tvsendUsec  = (tvsend->tv_usec) / 1000; //gives milliseconds
         
-        suseconds_t aa = (tvsend->tv_usec) / 1000; //gives milliseconds
-        suseconds_t bb = (tvrecv->tv_usec) / 1000; //gives milliseconds
+        tvrecvSec   = (tvrecv->tv_sec) * 1000; // gives milliseconds
+        tvrecvUsec  = (tvrecv->tv_usec) / 1000; //gives milliseconds
         
-        printf("a is:%ld aa is:%d\nb is:%ld bb is:%d\nb-a is:%ld\nbb-aa is:%d\nrtt is :%ld\n",
-               a, aa, b, bb, b-a, bb-aa, (b-a)+ (bb-aa));
+        rtt = tvrecvSec + tvrecvUsec - tvsendSec - tvsendUsec ;
         
-        tvrecv->tv_sec -= tvsend->tv_sec;
+        //printf("a is:%ld aa is:%d\nb is:%ld bb is:%d\nb-a is:%ld\nbb-aa is:%d\nrtt is :%ld\n",
+        //       a, aa, b, bb, b-a, bb-aa, (b-a)+ (bb-aa));
+        
+        //tvrecv->tv_sec -= tvsend->tv_sec;
         
         //rtt = tvrecv->tv_sec * 1000.0 + tvrecv->tv_usec / 1000.0;
-        rtt = tvrecv->tv_sec;
+        //rtt = tvrecv->tv_sec;
         
         if (inet_ntop(AF_INET, &sin->sin_addr, str, sizeof(str)) == NULL)
             perror("inet_ntop error");
