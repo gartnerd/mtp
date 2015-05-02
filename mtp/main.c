@@ -2,14 +2,6 @@
 //  main.c
 //  mtp
 //
-//  Created by David Gartner on 2015-05-01.
-//
-//  main.c
-//  mtping2
-//
-//  Created by David Gartner on 2015-05-01.
-//  Copyright (c) 2015 David Gartner. All rights reserved.
-//
 // prototype code for trying a multi-threaded approach to
 // send out multiple ICMP echo requests
 //
