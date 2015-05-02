@@ -60,12 +60,10 @@ typedef struct {
 uint16_t in_cksum(uint16_t*, int);
 void    proc_v4(char*, ssize_t, struct msghdr*, struct timeval*, icmp_t*, int);
 void    send_v4(int, void*, icmp_t*, int);
-void*   p_init(void*);
+void    *p_init(void*);
 
-//sruct initialization below is a C99 thing
-//struct proto *pr = &(struct proto){proc_v4, send_v4, NULL, NULL, 0, 0};
-
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[])
+{
     pthread_t *threadA = (pthread_t*)malloc(sizeof(pthread_t));
     pthread_t *threadB = (pthread_t*)malloc(sizeof(pthread_t));
     
@@ -88,8 +86,8 @@ int main(int argc, char *argv[]) {
     return(EXIT_SUCCESS);
 }
 
-void *p_init(void *fa){
-    
+void *p_init(void *fa)
+{
     int     sockfd;
     int     size = 60 * 1024; //eventually used to create a 60kb buffer
     int     counter = 10;
@@ -101,32 +99,21 @@ void *p_init(void *fa){
     struct  iovec   iov;
     struct  timeval tval;
     struct  sockaddr_in  sai;
-    struct  protoent     *proto;
-    
+
+    struct protoent *proto = getprotobyname("icmp");
+    icmp_t *pr = (icmp_t*)malloc(sizeof(icmp_t));
     pin_t  *ft = (pin_t*)fa;
     int     id = ft->id;
-    
-    //    char *h = "156.151.59.19";
-    icmp_t *pr = (icmp_t*)malloc(sizeof(icmp_t));
-    
-    proto = getprotobyname("icmp");
-    
+
     sai.sin_family  = PF_INET;
     
     if (inet_pton(AF_INET, ft->hostIp, &sai.sin_addr) < 1)
         perror("inet_pton error");
     
-    pid = getpid() & 0xffff;
-    
-    printf("pid value is: %d\n", pid);
-    
-    //pr = &proto_v4;
     pr->sasend  = (struct sockaddr*)&sai;
     pr->sarecv = calloc(1,sizeof(sai));
     pr->salen   = sizeof(sai);
     pr->icmpproto = proto->p_proto;
-    
-    //   readloop(); would go here in non-threaded program
     
 #ifdef DARWIN
     sockfd = socket(pr->sasend->sa_family, SOCK_DGRAM, pr->icmpproto);
@@ -137,8 +124,6 @@ void *p_init(void *fa){
     
     setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, &size, sizeof(size));
     
-    send_v4(sockfd, sendbuf, pr, id);
-    
     iov.iov_base = recvbuf;
     iov.iov_len  = sizeof(recvbuf);
     
@@ -147,6 +132,8 @@ void *p_init(void *fa){
     msg.msg_iovlen = 1;
     msg.msg_control = controlbuf;
     
+    send_v4(sockfd, sendbuf, pr, id);
+
     while(counter > 0) {
         
         //these msg values could change after a call to recvmsg
@@ -176,18 +163,17 @@ void send_v4(int fd, void* buffer, icmp_t* spr, int id)
 {
     int len;
     int datalen = 56;
-    int nsent = 1;
+    int nsent   = 1;
     struct icmp *icmp; //see ip_icmp.h for icmp struct def
     
     icmp = (struct icmp*)buffer;
     icmp->icmp_type = ICMP_ECHO;
     icmp->icmp_code = 0;
-    
-    //printf("setting id to %d\n", pid);
-    
     icmp->icmp_id = id; // should be a unique value e.g. pid
     icmp->icmp_seq = nsent++;
+    
     memset(icmp->icmp_data, 0xa5, datalen); //0xa5 is just an arbitrary value that results in an alternating bit pattern
+    
     //    Gettimeofday((struct timeval*)icmp->icmp_data, NULL);
     
     //ICMP header is a fixed 8 bytes plus 0 or more data bytes
@@ -195,17 +181,14 @@ void send_v4(int fd, void* buffer, icmp_t* spr, int id)
     icmp->icmp_cksum = 0;
     icmp->icmp_cksum = in_cksum((u_short*)icmp, len);
     
-    //printf("about to send packet off\n");
-    
     if (sendto(fd, buffer, len, 0, spr->sasend, spr->salen) != (ssize_t)len)
         perror("sendto error");
 }
 
 void proc_v4(char *ptr, ssize_t len, struct msghdr *msg, struct timeval *tvrecv, icmp_t* spr, int id)
 {
-    int     hlen1, icmplen;
+    long    hlen1, icmplen;
     double  rtt;
-    char    *dst;
     char    str[128];
     struct  ip       *ip;
     struct  icmp     *icmp;
@@ -221,6 +204,7 @@ void proc_v4(char *ptr, ssize_t len, struct msghdr *msg, struct timeval *tvrecv,
     }
     
     icmp = (struct icmp*)(ptr + hlen1); //move to the location in the datagram where the ICMP packet begins
+                                        //somewhat uncomfortable on the way that this works
     
     if ((icmplen = len - hlen1) < 8) {
         printf("size is less than minimum\n");
@@ -230,7 +214,7 @@ void proc_v4(char *ptr, ssize_t len, struct msghdr *msg, struct timeval *tvrecv,
     if (icmp->icmp_type == ICMP_ECHOREPLY) {
         if(icmp->icmp_id != id) {
             //printf("id %d didn't match pid: %d\n", icmp->icmp_id, id);
-            return; //not a packet sent by this process
+            return; //not a packet sent by the caller
         }
         if(icmplen < 16) {
             printf("incomplete timeval struct receceived\n");
@@ -238,21 +222,16 @@ void proc_v4(char *ptr, ssize_t len, struct msghdr *msg, struct timeval *tvrecv,
         }
         
         tvsend = (struct timeval*)icmp->icmp_data;
-        //tv_sub(tvrecv, tvsend);
         
         tvrecv->tv_sec -= tvsend->tv_sec;
         
-        rtt = tvrecv->tv_sec * 1000.0 + tvrecv->tv_usec / 1000.0;
+        //rtt = tvrecv->tv_sec * 1000.0 + tvrecv->tv_usec / 1000.0;
+        rtt = tvrecv->tv_sec;
         
         if (inet_ntop(AF_INET, &sin->sin_addr, str, sizeof(str)) == NULL)
             perror("inet_ntop error");
         
-        //dst = sock_ntop_host(spr->sarecv, spr->salen);
-        
-        //if (dst == NULL)
-        //    perror("sock_ntop_host error");
-        
-        printf("%d bytes from %s: icmp_seq=%u, ttl=%d, rtt=%.3f ms\n",
+        printf("%ld bytes from %s: icmp_seq=%u, ttl=%d, rtt=%.3f ms\n",
                icmplen, str, icmp->icmp_seq, ip->ip_ttl, rtt);
     }
     

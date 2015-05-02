@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		4F1B27131AF481B9001E9F32 /* main.c in Sources */ = {isa = PBXBuildFile; fileRef = 4F1B27121AF481B9001E9F32 /* main.c */; };
+		4F1B27131AF481B9001E9F32 /* main.c in Sources */ = {isa = PBXBuildFile; fileRef = 4F1B27121AF481B9001E9F32 /* main.c */; settings = {COMPILER_FLAGS = "-DDARWIN"; }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -235,6 +235,7 @@
 				4F1B27181AF481B9001E9F32 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
 	};
