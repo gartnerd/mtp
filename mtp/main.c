@@ -32,29 +32,25 @@
 
 #define BUFSIZE 1500
 
-//global vars
-/**********************************/
-int     nsent = 1;
-pid_t   pid;
-/**********************************/
+//global structs
 
-
-//global struct
-/************************************************/
 typedef struct {
     struct  sockaddr    *sasend;
     struct  sockaddr    *sarecv;
     socklen_t   salen;
     int         icmpproto;
 } icmp_t;
-/************************************************/
 
-/***************************************/
 typedef struct {
     char    *hostIp;
     int     id;
 } pin_t;
-/***************************************/
+
+//global mutex
+pthread_mutex_t global_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+pthread_t *threadA = NULL;
+pthread_t *threadB = NULL;
 
 //function prototypes
 uint16_t in_cksum(uint16_t*, int);
@@ -64,8 +60,8 @@ void    *p_init(void*);
 
 int main(int argc, char *argv[])
 {
-    pthread_t *threadA = (pthread_t*)malloc(sizeof(pthread_t));
-    pthread_t *threadB = (pthread_t*)malloc(sizeof(pthread_t));
+    threadA = (pthread_t*)malloc(sizeof(pthread_t));
+    threadB = (pthread_t*)malloc(sizeof(pthread_t));
     
     pin_t *fa1 = (pin_t*)malloc(sizeof(pin_t));
     pin_t *fa2 = (pin_t*)malloc(sizeof(pin_t));
@@ -77,10 +73,10 @@ int main(int argc, char *argv[])
     fa2->id = 20;
     
     pthread_create(threadA, NULL, p_init, (void*)fa1);
-    //pthread_create(threadB, NULL, p_init, (void*)fa2);
+    pthread_create(threadB, NULL, p_init, (void*)fa2);
     
     pthread_join(*threadA, NULL);
-    //pthread_join(*threadB, NULL);
+    pthread_join(*threadB, NULL);
     
     // need to add some free() calls here
     return(EXIT_SUCCESS);
@@ -131,8 +127,11 @@ void *p_init(void *fa)
     msg.msg_iov  = &iov;
     msg.msg_iovlen = 1;
     msg.msg_control = controlbuf;
-    
+
+    pthread_mutex_lock(&global_mutex);
     send_v4(sockfd, sendbuf, pr, id);
+    pthread_mutex_unlock(&global_mutex);
+
 
     while(counter > 0) {
         
@@ -145,11 +144,16 @@ void *p_init(void *fa)
         
         gettimeofday(&tval, NULL);
         
+        pthread_mutex_lock(&global_mutex);
         proc_v4(recvbuf, n, &msg, &tval, pr, id);
+        pthread_mutex_unlock(&global_mutex);
         
-        sleep(1); //so we don't flood the network with pings
+        sleep(rand()%10); //so we don't flood the network with pings
         
+        pthread_mutex_lock(&global_mutex);
         send_v4(sockfd, sendbuf, pr, id);
+        pthread_mutex_unlock(&global_mutex);
+        
         //printf("loop:%d\n", counter);
         counter--;
         
@@ -163,8 +167,18 @@ void send_v4(int fd, void* buffer, icmp_t* spr, int id)
 {
     int len;
     int datalen = 56;
-    int nsent   = 1;
+    static int nsent;
     struct icmp *icmp; //see ip_icmp.h for icmp struct def
+    
+    pthread_t thread_id = pthread_self();
+    
+    if (pthread_equal(thread_id, *threadA)) {
+        printf("ThreadA in send_v4\n");
+    }
+    else if (pthread_equal(thread_id, *threadB)) {
+        printf("ThreadB in send_v4\n");
+    }
+
     
     icmp = (struct icmp*)buffer;
     icmp->icmp_type = ICMP_ECHO;
@@ -187,7 +201,8 @@ void send_v4(int fd, void* buffer, icmp_t* spr, int id)
 
 void proc_v4(char *ptr, ssize_t len, struct msghdr *msg, struct timeval *tvrecv, icmp_t* spr, int id)
 {
-    long    hlen1, icmplen;
+
+    long    hlen, icmplen;
     double  rtt;
     char    str[128];
     time_t  tvsendSec, tvrecvSec;
@@ -196,26 +211,37 @@ void proc_v4(char *ptr, ssize_t len, struct msghdr *msg, struct timeval *tvrecv,
     struct  icmp     *icmp;
     struct  timeval  *tvsend;
     struct  sockaddr_in *sin = (struct sockaddr_in*)spr->sarecv;
+
+    pthread_t thread_id = pthread_self();
+    
+    if (pthread_equal(thread_id, *threadA)) {
+        printf("ThreadA in proc_v4\n");
+    }
+    else if (pthread_equal(thread_id, *threadB)) {
+        printf("ThreadB in proc_v4\n");
+    }
+
     
     ip = (struct ip*)ptr;   //start of IP header
-    hlen1 = ip->ip_hl << 2; //ip_hl gives length in 32bit words. Divide by 4 to get header length in bytes
+    hlen = ip->ip_hl << 2; //ip_hl gives length in 32bit words. Divide by 4 to get header length in bytes
+    icmplen = len - hlen;
+    
+    icmp = (struct icmp*)(ptr + hlen); //move to the location in the datagram where the ICMP packet begins
+    //somewhat uncomfortable on the way that this works
     
     if (ip->ip_p != IPPROTO_ICMP) {
         printf("packet is not an ICMP echo request\n");
         return; //only interested in ICMP packets
     }
     
-    icmp = (struct icmp*)(ptr + hlen1); //move to the location in the datagram where the ICMP packet begins
-                                        //somewhat uncomfortable on the way that this works
-    
-    if ((icmplen = len - hlen1) < 8) {
+    if (icmplen < 8) {
         printf("size is less than minimum\n");
         return; //minimum size for ICMP packet is 8 bytes i.e. header is min 8 bytes
     }
     
     if (icmp->icmp_type == ICMP_ECHOREPLY) {
         if(icmp->icmp_id != id) {
-            //printf("id %d didn't match pid: %d\n", icmp->icmp_id, id);
+            printf("id %d is not mine %d\n", icmp->icmp_id, id);
             return; //not a packet sent by the caller
         }
         if(icmplen < 16) {
@@ -233,18 +259,10 @@ void proc_v4(char *ptr, ssize_t len, struct msghdr *msg, struct timeval *tvrecv,
         
         rtt = tvrecvSec + tvrecvUsec - tvsendSec - tvsendUsec ;
         
-        //printf("a is:%ld aa is:%d\nb is:%ld bb is:%d\nb-a is:%ld\nbb-aa is:%d\nrtt is :%ld\n",
-        //       a, aa, b, bb, b-a, bb-aa, (b-a)+ (bb-aa));
-        
-        //tvrecv->tv_sec -= tvsend->tv_sec;
-        
-        //rtt = tvrecv->tv_sec * 1000.0 + tvrecv->tv_usec / 1000.0;
-        //rtt = tvrecv->tv_sec;
-        
         if (inet_ntop(AF_INET, &sin->sin_addr, str, sizeof(str)) == NULL)
             perror("inet_ntop error");
         
-        printf("%ld bytes from %s: icmp_seq=%u, ttl=%d, rtt=%.3f ms\n",
+        printf("%ld bytes from %s: icmp_seq=%u, ttl=%d, rtt=%.1f ms\n",
                icmplen, str, icmp->icmp_seq, ip->ip_ttl, rtt);
     }
     
